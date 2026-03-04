@@ -41,7 +41,7 @@ def markov_graph_diffusion_initialize(
     obs_keys=None,
     reduced_dimension_transcriptome_obsm_key="X_pca",
     reduced_dimension_transcriptome_obsm_dims=2,
-    adjust_cell_network_by_transcriptome_scale=1,
+    theta=1,
     snn_threshold=0.1,
     conn_csr_matrix=None,
     smoothing_scale=0.8,
@@ -51,6 +51,9 @@ def markov_graph_diffusion_initialize(
     weigh_cells=True,
     balance_cell_quality=False,
     bcq_IQR=(0.15, 0.85),
+    phi=0,
+    copykat_obsm_key="X_copykat_cna",
+    copykat_pcs=20,
 ):
     """ Initialize the adata object for markov graph diffusion.
 
@@ -77,7 +80,7 @@ def markov_graph_diffusion_initialize(
     reduced_dimension_transcriptome_obsm_dims : :py:class:`int`, optional
         The number of dimensions for the low-dimension embedding of the transcriptomic data to be used for the Nearest Neighbors graph construction.
         Defaults to 2.
-    adjust_cell_network_by_transcriptome_scale : :py:class:`float`, optional
+    theta : :py:class:`float`, optional
         The scale of the transcriptome-based cell-cell adjacency matrix to be used for the Nearest Neighbors graph construction. Defaults to
         0 (not used).
     snn_threshold : :py:class:`float`, optional
@@ -102,7 +105,7 @@ def markov_graph_diffusion_initialize(
     """
 
     obsm_key = reduced_dimension_transcriptome_obsm_key
-    if adjust_cell_network_by_transcriptome_scale > 0:
+    if theta > 0:
         if obsm_key not in adata_input.obsm:
             logger.error(
                 f"{obsm_key} not in adata obsm. Please generate it before running markov graphical diffusion."
@@ -110,7 +113,8 @@ def markov_graph_diffusion_initialize(
             return None
         else:
             adata_input.obsm[obsm_key] = adata_input.obsm[obsm_key][:, :reduced_dimension_transcriptome_obsm_dims].copy()
-            
+            logger.info(f"Using transcriptome embedding '{obsm_key}' (shape={adata_input.obsm[obsm_key].shape}) with theta={theta}")
+
     if not set(node_features_obs_list).issubset(adata_input.obs.columns):
         logger.warning(
             f"{node_features_obs_list} not in adata.obs. Please generate it before running markov graphical diffusion."
@@ -141,10 +145,16 @@ def markov_graph_diffusion_initialize(
             and adata_input.uns[conn_key]["geom_constraint"] == geom_constraint
             and np.array_equal(adata_input.uns[conn_key]["features"], obs_keys)
             ) and (
-                    (adata_input.uns[conn_key]["theta"] == 0 and adjust_cell_network_by_transcriptome_scale == 0)
+                    (adata_input.uns[conn_key]["theta"] == 0 and theta == 0)
                     or (
-                        adata_input.uns[conn_key]["theta"] == adjust_cell_network_by_transcriptome_scale
+                        adata_input.uns[conn_key]["theta"] == theta
                         and adata_input.uns[conn_key]["transcriptome"] == obsm_key
+                        )
+                    ) and (
+                    (adata_input.uns[conn_key].get("phi", 0) == 0 and phi == 0)
+                    or (
+                        adata_input.uns[conn_key].get("phi", 0) == phi
+                        and adata_input.uns[conn_key].get("copykat", "") == copykat_obsm_key
                         )
                     )
 
@@ -154,7 +164,6 @@ def markov_graph_diffusion_initialize(
             COMPUTE_SNN = False
         else:
             COMPUTE_SNN = True
-
     # yapf: enable
     if COMPUTE_SNN:
         add_snn_to_adata(
@@ -163,9 +172,12 @@ def markov_graph_diffusion_initialize(
             neighbor_num=n_neighbors,
             geom_morph_ratio=geom_morph_ratio,
             geom_constraint=geom_constraint,
-            theta=adjust_cell_network_by_transcriptome_scale,
+            theta=theta,
             conn_key=conn_key,
             reduced_dimension_transcriptome_obsm_key=obsm_key,
+            phi=phi,
+            copykat_obsm_key=copykat_obsm_key,
+            copykat_pcs=copykat_pcs,
         )
     # Done with SNN calculation.
 

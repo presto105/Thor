@@ -55,7 +55,7 @@ default_graph_params = dict(
     reduced_dimension_transcriptome_obsm_dims=2,
     geom_morph_ratio=1,
     geom_constraint=0,
-    adjust_cell_network_by_transcriptome_scale=0,
+    theta=0,
     snn_threshold=0.1,
     smoothing_scale=0.8,
     conn_csr_matrix=None,
@@ -65,6 +65,9 @@ default_graph_params = dict(
     weigh_cells=True,
     balance_cell_quality=False,
     bcq_IQR=(0.15, 0.85),
+    phi=0,
+    copykat_obsm_key="X_copykat_cna",
+    copykat_pcs=20,
 )
 
 
@@ -115,6 +118,7 @@ class fineST:
         genes_path=None,
         save_dir=None,
         recipe="gene",
+        copykat_cna_path=None,
         **kwargs
     ):
         self.name = name
@@ -153,8 +157,9 @@ class fineST:
             self.load_genes(genes_path)
 
         self.recipe = recipe
-        self.graph_params = default_graph_params
-        self.run_params = default_run_params
+        self.graph_params = default_graph_params.copy()
+        self.run_params = default_run_params.copy()
+        self.copykat_cna_path = os.path.abspath(copykat_cna_path) if copykat_cna_path is not None else None
         self.__dict__.update(kwargs)
 
     def prepare_input(self, mapping_margin=10, spot_identifier="spot_barcodes"):
@@ -193,6 +198,57 @@ class fineST:
         self.adata.obs.loc[:, "spot_heterogeneity"] = obs_edited
         #self.write_adata(f"{self.name}_adata_cell_pre-run.h5ad", self.adata)
         #self.data_pre_path = os.path.join(self.save_dir, f"{self.name}_adata_cell_pre-run.h5ad")
+
+    def load_copykat_cna(self, copykat_cna_path=None, obsm_key="X_copykat_cna"):
+        """Load CopyKAT CNA results and map spot-level CNA profiles to individual cells.
+
+        The CopyKAT CNA transposed TSV file has rows as spots (barcodes) and columns as
+        genomic loci CNA values. Each cell is assigned the CNA profile of its mapped spot
+        via ``adata.obs["spot_barcodes"]``.
+
+        Parameters
+        ----------
+        copykat_cna_path : :py:class:`str` or :py:obj:`None`, optional
+            Path to the CopyKAT CNA transposed TSV file. If :py:obj:`None`, uses ``self.copykat_cna_path``.
+        obsm_key : :py:class:`str`, optional
+            Key in ``adata.obsm`` to store the CNA array. Default is ``"X_copykat_cna"``.
+
+        Returns
+        -------
+        :py:obj:`None`
+            The CNA array is stored in ``self.adata.obsm[obsm_key]``.
+        """
+        if copykat_cna_path is None:
+            copykat_cna_path = self.copykat_cna_path
+
+        if copykat_cna_path is None:
+            logger.warning("CopyKAT CNA path is not set. Skipping CNA loading.")
+            return
+
+        logger.info(f"Loading CopyKAT CNA from {copykat_cna_path}")
+        cna_df = pd.read_csv(copykat_cna_path, sep="\t", index_col=0)
+        logger.info(f"CopyKAT CNA matrix: {cna_df.shape[0]} spots x {cna_df.shape[1]} loci")
+
+        # Map spot-level CNA to each cell using spot_barcodes
+        cell_barcodes = self.adata.obs["spot_barcodes"]
+        common_barcodes = cell_barcodes.isin(cna_df.index)
+        n_mapped = common_barcodes.sum()
+        n_total = len(cell_barcodes)
+        logger.info(f"CopyKAT CNA: {n_mapped}/{n_total} cells mapped to CNA spots.")
+
+        if n_mapped == 0:
+            logger.warning("No cells could be mapped to CopyKAT CNA spots. Check barcode format.")
+            return
+
+        # For cells whose spot has CNA data, assign the spot's CNA profile
+        # For cells whose spot is missing from CNA, fill with 0 (neutral CNA)
+        cna_array = np.zeros((n_total, cna_df.shape[1]), dtype=np.float32)
+        mapped_indices = np.where(common_barcodes.values)[0]
+        mapped_spot_barcodes = cell_barcodes.values[mapped_indices]
+        cna_array[mapped_indices] = cna_df.loc[mapped_spot_barcodes].values.astype(np.float32)
+
+        self.adata.obsm[obsm_key] = cna_array
+        logger.info(f"CopyKAT CNA stored in adata.obsm['{obsm_key}'] with shape {cna_array.shape}")
 
     def vae_training(
             self, vae_genes_set=None, min_mean_expression=0.1, **kwargs
@@ -428,7 +484,7 @@ class fineST:
             Whether to save the MCMC chain. Default is :py:obj:`False`.
         n_jobs : :py:class:`int`, optional
             Number of parallel jobs to run. Default is 1.
-        adjust_cell_network_by_transcriptome_scale : :py:class:`float`, optional
+        theta : :py:class:`float`, optional
             Scale for adjusting cell network by transcriptome. Default is 0.
 
         See Also
@@ -513,8 +569,14 @@ class fineST:
             return self.adata
 
         # burn-in if you would like to include the effect of the input transcriptome in the cell-cell graph construction
-        if self.graph_params["adjust_cell_network_by_transcriptome_scale"] > 0:
+        if self.graph_params["theta"] > 0:
             self._burn_in(n_iter=self.run_params["burn_in_steps"], n_pcs=self.graph_params["reduced_dimension_transcriptome_obsm_dims"])
+
+        # Load CopyKAT CNA data if phi > 0
+        if self.graph_params.get("phi", 0) > 0:
+            copykat_obsm_key = self.graph_params.get("copykat_obsm_key", "X_copykat_cna")
+            if copykat_obsm_key not in self.adata.obsm:
+                self.load_copykat_cna(obsm_key=copykat_obsm_key)
 
         # initialization: constructing cell graph and the transition matrix
         if self.run_params["initialize"]:
@@ -558,7 +620,7 @@ class fineST:
 
     def _burn_in(self, n_iter=5, genes_included="highly_variable", n_pcs=2):
         """ Burn-in the Markov graph diffusion. To include the effect of the input transcriptome in the cell-cell graph construction, we run :func:`estimate_expression_markov_graph_diffusion` function for the
-        finest estimation using only histology features with vanilla parameters for ``n_iter`` steps (default: 5). In the burnin stage, ``adjust_cell_network_by_transcriptome_scale`` is set to 0. 
+        finest estimation using only histology features with vanilla parameters for ``n_iter`` steps (default: 5). In the burnin stage, ``theta`` is set to 0. 
 
         Parameters
         ----------
@@ -594,15 +656,26 @@ class fineST:
         temp_dir = os.path.join(burnin.save_dir, "BURNIN_TEMP")
         os.makedirs(temp_dir, exist_ok=True)
 
+        # Load CopyKAT CNA data into burnin adata if phi > 0,
+        # so the SNN graph construction can use CNA distance during burn-in
+        phi = burnin.graph_params.get("phi", 0)
+        if phi > 0:
+            copykat_obsm_key = burnin.graph_params.get("copykat_obsm_key", "X_copykat_cna")
+            if copykat_obsm_key not in burnin.adata.obsm:
+                burnin.load_copykat_cna(obsm_key=copykat_obsm_key)
+                # Also propagate CNA data back to the main object to avoid re-loading later
+                if copykat_obsm_key in burnin.adata.obsm:
+                    self.adata.obsm[copykat_obsm_key] = burnin.adata.obsm[copykat_obsm_key]
+
         # initialization: constructing cell graph and the transition matrix
-        burnin.graph_params["adjust_cell_network_by_transcriptome_scale"] = 0
+        burnin.graph_params["theta"] = 0
         if burnin.run_params["initialize"]:
             markov_graph_diffusion_initialize(burnin.adata, **burnin.graph_params)
 
         # # set genes for prediction
         if genes_included == "highly_variable":
             # recompute the highly variable genes based on the cell-wise gene expression
-            sc.pp.highly_variable_genes(burnin.adata, inplace=True)
+            sc.pp.highly_variable_genes(burnin.adata, inplace=True, flavor='seurat_v3')
         # burnin.genes = genes_included
         burnin.set_genes_for_prediction(genes_selection_key=genes_included)
 
@@ -628,6 +701,12 @@ class fineST:
         )
 
         ad_burnin = burnin.load_result(f"burnin_{n_iter}.npz")
+        # Ensure X is float dtype for PCA (svds requires floating point)
+        from scipy.sparse import issparse as _issparse
+        if _issparse(ad_burnin.X):
+            ad_burnin.X = ad_burnin.X.astype(np.float32)
+        else:
+            ad_burnin.X = np.asarray(ad_burnin.X, dtype=np.float32)
         sc.tl.pca(ad_burnin, n_comps=n_pcs)
         self.adata.obsm["X_pca"] = ad_burnin.obsm["X_pca"]
 

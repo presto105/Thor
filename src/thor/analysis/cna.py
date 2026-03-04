@@ -532,9 +532,9 @@ def combine_copykat_predictions(
 def plot_cna_heatmap_with_pred(
     tsv_path: str,
     pred_path: str,
-    label_col: str | None = None,            # e.g. "cell_type"; if None, uses 2nd column
-    label_colors: dict | None = None,        # e.g. {"aneuploid":"crimson","diploid":"steelblue"}
-    label_order: dict | None = None,         # e.g. {"aneuploid":0, "diploid":1}
+    label_col: str = None,            # e.g. "cell_type"; if None, uses 2nd column
+    label_colors: dict = None,        # e.g. {"aneuploid":"crimson","diploid":"steelblue"}
+    label_order: dict = None,         # e.g. {"aneuploid":0, "diploid":1}
     vmin: float = -0.3,
     vmax: float = 0.3,
     cmap: str = "coolwarm",
@@ -698,9 +698,9 @@ def plot_cna_heatmap_with_pred(
 def plot_segment_cna_heatmap_with_pred(
     tsv_path: str,
     pred_path: str,
-    label_col: str | None = None,            # e.g. "cell_type"; if None, uses 2nd column
-    label_colors: dict | None = None,        # e.g. {"aneuploid":"crimson","diploid":"steelblue"}
-    label_order: dict | None = None,         # e.g. {"aneuploid":0, "diploid":1}
+    label_col: str = None,            # e.g. "cell_type"; if None, uses 2nd column
+    label_colors: dict = None,        # e.g. {"aneuploid":"crimson","diploid":"steelblue"}
+    label_order: dict = None,         # e.g. {"aneuploid":0, "diploid":1}
     vmin: float = -0.3,
     vmax: float = 0.3,
     cmap: str = "coolwarm",

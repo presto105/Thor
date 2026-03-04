@@ -301,7 +301,10 @@ def construct_SNN(
     reduce_morph_dim=False,
     reduced_dimension_image_features_pcs=15,
     theta=0,
-    transcriptome_array=None
+    transcriptome_array=None,
+    phi=0,
+    copykat_array=None,
+    copykat_pcs=20,
 ):
     """
     Parameters
@@ -361,6 +364,20 @@ def construct_SNN(
         ts = ts * theta / np.sqrt(ts.shape[1]) * 100
         X = np.concatenate((X, ts), axis=1)
 
+    # CopyKAT CNA distance
+    if copykat_array is not None and phi > 0:
+        logger.info(f"Incorporate CopyKAT CNA features. Raw dimension = {copykat_array.shape[1]}.")
+        cna = StandardScaler().fit_transform(copykat_array)
+        # Reduce dimensionality via PCA if the number of CNA features is large
+        if cna.shape[1] > copykat_pcs:
+            pca_cna = PCA(n_components=copykat_pcs)
+            cna = pca_cna.fit_transform(cna)
+            cna = StandardScaler().fit_transform(cna)
+            logger.info(f"Reduced CopyKAT CNA features to {cna.shape[1]} PCs.")
+        cna = cna * phi / np.sqrt(cna.shape[1]) * 100
+        X = np.concatenate((X, cna), axis=1)
+        logger.info(f"CopyKAT CNA features incorporated with phi={phi}.")
+
     if geom_constraint is None or geom_constraint <= 0:
         knn_graph, distance_graph = kneighbors_conndist_graph(
             X, n_neighbors=neighbor_num, include_self=False
@@ -377,6 +394,7 @@ def construct_SNN(
         save_npz(save_conn_path, snn_connectivity)
         save_npz(save_conn_path+"-dist.npz", snn_distance)
         logger.info(f"SNN matrix saved at {save_conn_path}")
+
     return snn_connectivity, snn_distance, knn_graph, distance_graph
 
 
@@ -389,6 +407,9 @@ def add_snn_to_adata(
     theta=0,
     conn_key="snn",
     reduced_dimension_transcriptome_obsm_key="X_pca",
+    phi=0,
+    copykat_obsm_key="X_copykat_cna",
+    copykat_pcs=20,
 ):
 
     obsm_key = reduced_dimension_transcriptome_obsm_key
@@ -396,6 +417,7 @@ def add_snn_to_adata(
     associated_knn_key = f"knn_connectivities"
     X = adata.obs[obs_keys]
     transcriptome_array = adata.obsm[obsm_key] if obsm_key in adata.obsm else None
+    copykat_array = adata.obsm[copykat_obsm_key] if copykat_obsm_key in adata.obsm else None
 
     _snn, _snn_dist, _knn, _knn_dist = construct_SNN(
         X,
@@ -405,6 +427,9 @@ def add_snn_to_adata(
         geom_constraint=geom_constraint,
         theta=theta,
         transcriptome_array=transcriptome_array,
+        phi=phi,
+        copykat_array=copykat_array,
+        copykat_pcs=copykat_pcs,
     )
 
     # if geom_constraint > 0:
@@ -424,4 +449,6 @@ def add_snn_to_adata(
     adata.uns[conn_key]["geom_constraint"] = geom_constraint
     adata.uns[conn_key]["theta"] = theta
     adata.uns[conn_key]["transcriptome"] = obsm_key
+    adata.uns[conn_key]["phi"] = phi
+    adata.uns[conn_key]["copykat"] = copykat_obsm_key
     logger.info(f"Add adata.uns[\"{conn_key}\"]")
