@@ -42,6 +42,7 @@ dependencies = [
     "tensorflow<=2.14",
     "keras<=2.14",
     "omnipath>=1.0.8",
+    "spatialdata-plot<=0.2.3",
 ]
 
 [project.optional-dependencies]

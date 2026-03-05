@@ -169,7 +169,10 @@ def get_stats_in_neighboring_cells(x, nn):
     nn = row_normalize_sparse(nn)
     x2_ = nn * (x * x)
     x_ = nn * x
-    x_sigma = np.sqrt(x2_ - x_ * x_)
+    variance = x2_ - x_ * x_
+    # Clamp to non-negative: floating point errors can make E[X^2] - E[X]^2 slightly negative
+    variance = np.clip(variance, 0, None)
+    x_sigma = np.sqrt(variance)
 
     return x_, x_sigma
 

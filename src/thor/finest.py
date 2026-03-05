@@ -572,6 +572,7 @@ class fineST:
         if self.graph_params["theta"] > 0:
             self._burn_in(n_iter=self.run_params["burn_in_steps"], n_pcs=self.graph_params["reduced_dimension_transcriptome_obsm_dims"])
 
+        
         # Load CopyKAT CNA data if phi > 0
         if self.graph_params.get("phi", 0) > 0:
             copykat_obsm_key = self.graph_params.get("copykat_obsm_key", "X_copykat_cna")
@@ -582,6 +583,7 @@ class fineST:
         if self.run_params["initialize"]:
             markov_graph_diffusion_initialize(self.adata, **self.graph_params)
 
+        
         self.data_pre_path = os.path.join(self.save_dir,
                                           f"{self.name}_adata_cell_input.h5ad")
         self.run_params["regulate_expression_mean"] = self.run_params["regulate_expression_mean"] and self.recipe == "reduced"
@@ -653,6 +655,7 @@ class fineST:
         burnin = self.copy()
         burnin.adata.X = get_adata_layer_array(burnin.adata, layer_key=burnin.run_params["layer"])
 
+        
         temp_dir = os.path.join(burnin.save_dir, "BURNIN_TEMP")
         os.makedirs(temp_dir, exist_ok=True)
 
@@ -708,6 +711,7 @@ class fineST:
         else:
             ad_burnin.X = np.asarray(ad_burnin.X, dtype=np.float32)
         sc.tl.pca(ad_burnin, n_comps=n_pcs)
+        
         self.adata.obsm["X_pca"] = ad_burnin.obsm["X_pca"]
 
         # Clean up

@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 from qnorm import quantile_normalize
 from scipy.sparse import csr_matrix, issparse, save_npz
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 # local package
@@ -114,6 +116,30 @@ def markov_graph_diffusion_initialize(
         else:
             adata_input.obsm[obsm_key] = adata_input.obsm[obsm_key][:, :reduced_dimension_transcriptome_obsm_dims].copy()
             logger.info(f"Using transcriptome embedding '{obsm_key}' (shape={adata_input.obsm[obsm_key].shape}) with theta={theta}")
+
+    # Reduce CopyKAT CNA dimensions to match reduced_dimension_transcriptome_obsm_dims (like X_pca)
+    if phi > 0:
+        if copykat_obsm_key in adata_input.obsm:
+            cna_raw = adata_input.obsm[copykat_obsm_key]
+            n_target_dims = reduced_dimension_transcriptome_obsm_dims
+            if cna_raw.shape[1] > n_target_dims:
+                pca_cna = PCA(n_components=n_target_dims)
+                cna_reduced = pca_cna.fit_transform(StandardScaler().fit_transform(cna_raw))
+                adata_input.obsm[copykat_obsm_key] = cna_reduced.astype(cna_raw.dtype)
+                logger.info(
+                    f"Reduced CopyKAT CNA '{copykat_obsm_key}' from {cna_raw.shape[1]} to {n_target_dims} dims "
+                    f"(matching reduced_dimension_transcriptome_obsm_dims) with phi={phi}"
+                )
+            else:
+                logger.info(
+                    f"CopyKAT CNA '{copykat_obsm_key}' already has {cna_raw.shape[1]} dims "
+                    f"(<= target {n_target_dims}), no reduction needed."
+                )
+        else:
+            logger.warning(
+                f"{copykat_obsm_key} not in adata.obsm but phi={phi} > 0. "
+                f"CNA features will not be used."
+            )
 
     if not set(node_features_obs_list).issubset(adata_input.obs.columns):
         logger.warning(
@@ -494,6 +520,8 @@ def rescale_predicted_gene_expression(
             sample_steps=smooth_predicted_expression_steps
         )
 
+    # Sanitize NaN/inf values that may arise from numerical instability
+    expr_adj = np.nan_to_num(expr_adj, nan=0.0, posinf=0.0, neginf=0.0)
     expr_adj[expr_adj < 0] = 0
 
     return out_layer_pos, expr_adj

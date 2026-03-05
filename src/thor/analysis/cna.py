@@ -150,6 +150,10 @@ def _write_r_script(folder_path, id_type, ngene_chr, win_size, KS_cut,
                     sam_name, distance, norm_cell_names, output_seg,
                     plot_genes, genome, n_cores):
     script = f"""
+    conda_prefix <- Sys.getenv("CONDA_PREFIX")
+    if (nchar(conda_prefix) > 0) {{
+        .libPaths(c(file.path(conda_prefix, "lib", "R", "library"), .libPaths()))
+    }}
     library(Seurat)
     library(copykat)
 
@@ -183,6 +187,10 @@ def _write_r_script(folder_path, id_type, ngene_chr, win_size, KS_cut,
 def _check_copykat_installation():
     """Check if CopyKAT R package is installed."""
     check_script = """
+    conda_prefix <- Sys.getenv("CONDA_PREFIX")
+    if (nchar(conda_prefix) > 0) {
+        .libPaths(c(file.path(conda_prefix, "lib", "R", "library"), .libPaths()))
+    }
     if (!require(copykat, quietly=TRUE)) {
         cat("ERROR: CopyKAT package not found. Please install it using:\\n")
         cat("if (!require(devtools)) install.packages('devtools')\\n")
