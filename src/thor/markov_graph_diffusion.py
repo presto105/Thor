@@ -55,7 +55,7 @@ def markov_graph_diffusion_initialize(
     bcq_IQR=(0.15, 0.85),
     phi=0,
     copykat_obsm_key="X_copykat_cna",
-    copykat_pcs=20,
+    copykat_pcs=2,
 ):
     """ Initialize the adata object for markov graph diffusion.
 
@@ -122,19 +122,6 @@ def markov_graph_diffusion_initialize(
         if copykat_obsm_key in adata_input.obsm:
             cna_raw = adata_input.obsm[copykat_obsm_key]
             n_target_dims = reduced_dimension_transcriptome_obsm_dims
-            if cna_raw.shape[1] > n_target_dims:
-                pca_cna = PCA(n_components=n_target_dims)
-                cna_reduced = pca_cna.fit_transform(StandardScaler().fit_transform(cna_raw))
-                adata_input.obsm[copykat_obsm_key] = cna_reduced.astype(cna_raw.dtype)
-                logger.info(
-                    f"Reduced CopyKAT CNA '{copykat_obsm_key}' from {cna_raw.shape[1]} to {n_target_dims} dims "
-                    f"(matching reduced_dimension_transcriptome_obsm_dims) with phi={phi}"
-                )
-            else:
-                logger.info(
-                    f"CopyKAT CNA '{copykat_obsm_key}' already has {cna_raw.shape[1]} dims "
-                    f"(<= target {n_target_dims}), no reduction needed."
-                )
         else:
             logger.warning(
                 f"{copykat_obsm_key} not in adata.obsm but phi={phi} > 0. "

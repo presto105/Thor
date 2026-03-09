@@ -304,7 +304,7 @@ def construct_SNN(
     transcriptome_array=None,
     phi=0,
     copykat_array=None,
-    copykat_pcs=20,
+    copykat_pcs=2,
 ):
     """
     Parameters
@@ -409,7 +409,7 @@ def add_snn_to_adata(
     reduced_dimension_transcriptome_obsm_key="X_pca",
     phi=0,
     copykat_obsm_key="X_copykat_cna",
-    copykat_pcs=20,
+    copykat_pcs=2,
 ):
 
     obsm_key = reduced_dimension_transcriptome_obsm_key

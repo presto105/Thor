@@ -162,7 +162,7 @@ class fineST:
         self.copykat_cna_path = os.path.abspath(copykat_cna_path) if copykat_cna_path is not None else None
         self.__dict__.update(kwargs)
 
-    def prepare_input(self, mapping_margin=10, spot_identifier="spot_barcodes"):
+    def prepare_input(self, mapping_margin=10, spot_identifier="spot_barcodes", copykat_cna_path=None, cna_n_pcs=2):
         """ Prepare the input for the fineST estimation.
 
             First, generate the cell-wise adata from the cell features and spot adata. In this step, the segmented cells will be read from the
@@ -187,6 +187,50 @@ class fineST:
             )
 
             self.adata = adata_sc_nearest_spot
+        
+        cna_path_to_use = copykat_cna_path if copykat_cna_path is not None else getattr(self, "copykat_cna_path", None)
+
+        if cna_path_to_use:
+            obsm_key = "X_copykat_cna"  # 사용할 key 명시
+            if obsm_key not in self.adata.obsm:
+                self.load_copykat_cna(
+                    copykat_cna_path=cna_path_to_use, 
+                    obsm_key=obsm_key
+                )
+            
+            if obsm_key in self.adata.obsm:
+                from sklearn.decomposition import PCA
+                from sklearn.preprocessing import StandardScaler  # 누락된 import 추가
+                
+                cna_matrix = self.adata.obsm[obsm_key]
+                target_dims = getattr(self, "graph_params", {}).get("reduced_dimension_transcriptome_obsm_dims", cna_n_pcs)
+                
+                if cna_matrix.shape[1] > target_dims:
+                    n_components = min(target_dims, cna_matrix.shape[1])
+                    
+                    pca_cna = PCA(n_components=n_components, random_state=42)
+                    cna_pca_result = pca_cna.fit_transform(StandardScaler().fit_transform(cna_matrix))
+                    
+                    # 정의된 변수명에 맞게 업데이트 (obsm 덮어쓰기)
+                    self.adata.obsm[obsm_key] = cna_pca_result.astype(cna_matrix.dtype)
+
+                    cna_pc_columns = [f"cna_PC_{i+1}" for i in range(n_components)]
+                    
+                    for i, col_name in enumerate(cna_pc_columns):
+                        self.adata.obs[col_name] = cna_pca_result[:, i]
+                        
+                    for col_name in cna_pc_columns:
+                        if col_name not in self.cell_features_list:
+                            self.cell_features_list.append(col_name)
+                            
+                    logger.info(
+                        f"Reduced CopyKAT CNA '{obsm_key}' from {cna_matrix.shape[1]} to {n_components} dims."
+                    )
+                else:
+                    logger.info(
+                        f"CopyKAT CNA '{obsm_key}' already has {cna_matrix.shape[1]} dims "
+                        f"(<= target {target_dims}), no reduction needed."
+                    )
 
         # compute spot heterogeneity, excluding the first two columns which are the 2D positions of the cells
         obs_edited = get_spot_heterogeneity_cv(
@@ -199,7 +243,7 @@ class fineST:
         #self.write_adata(f"{self.name}_adata_cell_pre-run.h5ad", self.adata)
         #self.data_pre_path = os.path.join(self.save_dir, f"{self.name}_adata_cell_pre-run.h5ad")
 
-    def load_copykat_cna(self, copykat_cna_path=None, obsm_key="X_copykat_cna"):
+    def load_copykat_cna(self, copykat_cna_path=None, obsm_key="X_copykat_cna", n_target_dims=2):
         """Load CopyKAT CNA results and map spot-level CNA profiles to individual cells.
 
         The CopyKAT CNA transposed TSV file has rows as spots (barcodes) and columns as
@@ -576,8 +620,6 @@ class fineST:
         # Load CopyKAT CNA data if phi > 0
         if self.graph_params.get("phi", 0) > 0:
             copykat_obsm_key = self.graph_params.get("copykat_obsm_key", "X_copykat_cna")
-            if copykat_obsm_key not in self.adata.obsm:
-                self.load_copykat_cna(obsm_key=copykat_obsm_key)
 
         # initialization: constructing cell graph and the transition matrix
         if self.run_params["initialize"]:
